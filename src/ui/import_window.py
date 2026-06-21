@@ -325,6 +325,9 @@ class ImportWindow(QWidget):
         self.drop_area.files_dropped.connect(self.on_files_dropped)
         layout.addWidget(self.drop_area)
 
+        checklist_frame = self.create_checklist_panel()
+        layout.addWidget(checklist_frame)
+
         tabs_title_layout = QHBoxLayout()
         tabs_title = QLabel("📂 附件分组查看")
         tabs_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1f2937; margin-top: 8px;")
@@ -536,6 +539,8 @@ class ImportWindow(QWidget):
         attachments = db_manager.get_attachments_by_record(record_id)
         for att in attachments:
             self.add_existing_attachment_to_tab(att)
+        
+        self.update_checklist(record_id)
 
     def add_existing_attachment_to_tab(self, attachment):
         cat_key = attachment.get('category', 'other')
@@ -873,6 +878,239 @@ class ImportWindow(QWidget):
 
         self.update_pending_count()
 
+    def create_checklist_panel(self):
+        frame = QFrame()
+        frame.setStyleSheet("""
+            QFrame {
+                background-color: #f0fdf4;
+                border: 1px solid #86efac;
+                border-radius: 10px;
+                padding: 10px;
+            }
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(8)
+        
+        title_row = QHBoxLayout()
+        title_label = QLabel("✅ 附件核对面板")
+        title_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #166534;")
+        title_row.addWidget(title_label)
+        title_row.addStretch()
+        
+        self.checklist_status = QLabel("请先选择一条浇筑记录")
+        self.checklist_status.setStyleSheet("color: #6b7280; font-size: 11px;")
+        title_row.addWidget(self.checklist_status)
+        layout.addLayout(title_row)
+        
+        self.checklist_items = {}
+        checklist_categories = [
+            ('photo', '📷 现场照片', '建议3张以上'),
+            ('ticket', '🧾 罐车小票', '必备'),
+            ('delegation', '📋 试块委托单', '必备'),
+            ('draft', '📝 现场草稿', '建议补充'),
+            ('document', '📄 其他文档', '可选'),
+        ]
+        
+        checklist_grid = QHBoxLayout()
+        checklist_grid.setSpacing(6)
+        
+        for cat_key, cat_label, cat_hint in checklist_categories:
+            item_frame = QFrame()
+            item_frame.setObjectName(f"checklist_{cat_key}")
+            item_frame.setStyleSheet("""
+                QFrame {
+                    background-color: white;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 6px;
+                    padding: 6px 8px;
+                }
+            """)
+            
+            item_layout = QVBoxLayout(item_frame)
+            item_layout.setContentsMargins(6, 4, 6, 4)
+            item_layout.setSpacing(2)
+            
+            name_label = QLabel(cat_label)
+            name_label.setObjectName(f"name_{cat_key}")
+            name_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #374151;")
+            item_layout.addWidget(name_label)
+            
+            count_label = QLabel("❌ 0 个")
+            count_label.setObjectName(f"count_{cat_key}")
+            count_label.setAlignment(Qt.AlignCenter)
+            count_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #dc2626;")
+            item_layout.addWidget(count_label)
+            
+            hint_label = QLabel(cat_hint)
+            hint_label.setObjectName(f"hint_{cat_key}")
+            hint_label.setAlignment(Qt.AlignCenter)
+            hint_label.setStyleSheet("font-size: 9px; color: #9ca3af;")
+            item_layout.addWidget(hint_label)
+            
+            checklist_grid.addWidget(item_frame, 1)
+            self.checklist_items[cat_key] = {
+                'frame': item_frame,
+                'count_label': count_label,
+                'name_label': name_label,
+                'hint_label': hint_label
+            }
+        
+        layout.addLayout(checklist_grid)
+        return frame
+    
+    def update_checklist(self, record_id=None):
+        if not record_id:
+            self.checklist_status.setText("请先选择一条浇筑记录")
+            for cat_key, items in self.checklist_items.items():
+                items['count_label'].setText("—")
+                items['count_label'].setStyleSheet("font-size: 13px; font-weight: bold; color: #9ca3af;")
+                items['frame'].setStyleSheet("""
+                    QFrame {
+                        background-color: white;
+                        border: 1px solid #e5e7eb;
+                        border-radius: 6px;
+                        padding: 6px 8px;
+                    }
+                """)
+            return
+        
+        attachments = db_manager.get_attachments_by_record(record_id)
+        category_counts = {k: 0 for k in self.checklist_items.keys()}
+        
+        for att in attachments:
+            cat = att.get('category', 'other')
+            if cat in category_counts:
+                category_counts[cat] += 1
+        
+        complete_count = 0
+        total_required = 0
+        
+        required_cats = ['photo', 'ticket', 'delegation']
+        recommended_counts = {'photo': 3, 'ticket': 1, 'delegation': 1}
+        
+        for cat_key, items in self.checklist_items.items():
+            count = category_counts.get(cat_key, 0)
+            items['count_label'].setText(f"{'✅' if count > 0 else '❌'} {count} 个")
+            
+            is_ok = False
+            if cat_key in required_cats:
+                total_required += recommended_counts[cat_key]
+                is_ok = count >= recommended_counts[cat_key]
+                if count > 0:
+                    complete_count += min(count, recommended_counts[cat_key])
+            elif count > 0:
+                is_ok = True
+            
+            if is_ok:
+                items['count_label'].setStyleSheet("font-size: 13px; font-weight: bold; color: #059669;")
+                items['frame'].setStyleSheet("""
+                    QFrame {
+                        background-color: #ecfdf5;
+                        border: 1px solid #6ee7b7;
+                        border-radius: 6px;
+                        padding: 6px 8px;
+                    }
+                """)
+            elif count > 0:
+                items['count_label'].setStyleSheet("font-size: 13px; font-weight: bold; color: #d97706;")
+                items['frame'].setStyleSheet("""
+                    QFrame {
+                        background-color: #fffbeb;
+                        border: 1px solid #fcd34d;
+                        border-radius: 6px;
+                        padding: 6px 8px;
+                    }
+                """)
+            else:
+                items['count_label'].setStyleSheet("font-size: 13px; font-weight: bold; color: #dc2626;")
+                items['frame'].setStyleSheet("""
+                    QFrame {
+                        background-color: #fef2f2;
+                        border: 1px solid #fecaca;
+                        border-radius: 6px;
+                        padding: 6px 8px;
+                    }
+                """)
+        
+        if total_required > 0:
+            progress = int(complete_count * 100 / total_required)
+            self.checklist_status.setText(f"资料完整度: {progress}%")
+            if progress >= 100:
+                self.checklist_status.setStyleSheet("color: #059669; font-size: 11px; font-weight: bold;")
+            elif progress >= 50:
+                self.checklist_status.setStyleSheet("color: #d97706; font-size: 11px; font-weight: bold;")
+            else:
+                self.checklist_status.setStyleSheet("color: #dc2626; font-size: 11px; font-weight: bold;")
+    
+    def highlight_missing_category(self, missing_category):
+        if not missing_category or missing_category not in self.checklist_items:
+            return
+        
+        items = self.checklist_items[missing_category]
+        
+        original_style = items['frame'].styleSheet()
+        flash_style = """
+            QFrame {
+                background-color: #fef3c7;
+                border: 2px solid #f59e0b;
+                border-radius: 6px;
+                padding: 6px 8px;
+            }
+        """
+        
+        def apply_flash():
+            items['frame'].setStyleSheet(flash_style)
+        
+        def restore():
+            items['frame'].setStyleSheet(original_style)
+        
+        from PySide6.QtCore import QTimer as _QTimer
+        for i, delay in enumerate([0, 400, 800, 1200, 1600]):
+            if i % 2 == 0:
+                _QTimer.singleShot(delay, apply_flash)
+            else:
+                _QTimer.singleShot(delay, restore)
+        _QTimer.singleShot(2000, restore)
+    
+    def focus_record(self, record_id, missing_category=''):
+        if not record_id:
+            return
+        
+        self.current_record_id = record_id
+        
+        root = self.project_tree.invisibleRootItem()
+        found = False
+        
+        for i in range(root.childCount()):
+            project_item = root.child(i)
+            for j in range(project_item.childCount()):
+                building_item = project_item.child(j)
+                for k in range(building_item.childCount()):
+                    record_item = building_item.child(k)
+                    data = record_item.data(0, Qt.UserRole)
+                    if data and data[0] == 'record' and data[1] == record_id:
+                        self.project_tree.setCurrentItem(record_item)
+                        self.project_tree.expandItem(project_item)
+                        self.project_tree.expandItem(building_item)
+                        
+                        record = db_manager.get_pouring_record_by_id(record_id)
+                        if record:
+                            self.load_record_to_form(record)
+                            self.load_attachments(record_id)
+                        
+                        if missing_category:
+                            from PySide6.QtCore import QTimer as _QTimer
+                            cat_index_map = {k: idx for idx, k in enumerate(file_utils.ATTACHMENT_CATEGORIES.keys())}
+                            if missing_category in cat_index_map:
+                                _QTimer.singleShot(200, lambda mi=cat_index_map[missing_category]: self.attachment_tabs.setCurrentIndex(mi))
+                                _QTimer.singleShot(300, lambda mc=missing_category: self.highlight_missing_category(mc))
+                        found = True
+                        break
+                if found:
+                    break
+    
     def clear_pending_files(self):
         if not self.pending_files:
             return

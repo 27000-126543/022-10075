@@ -131,21 +131,37 @@ def check_record_issues(record, attachments, sign_records):
     has_ticket = any(a.get('category') == 'ticket' for a in attachments)
     if not has_ticket:
         issues.append({
-            'level': 'info',
+            'level': 'warning',
             'message': '未检测到罐车小票附件',
-            'section': None,
+            'section': 'import',
             'field': None,
-            'suggestion': '建议导入罐车送货小票或混凝土发货单'
+            'suggestion': '建议导入罐车送货小票或混凝土发货单，点击跳转至资料导入',
+            'jump_target': 'import',
+            'missing_category': 'ticket'
         })
 
     has_delegation = any(a.get('category') == 'delegation' for a in attachments)
     if not has_delegation:
         issues.append({
-            'level': 'info',
+            'level': 'warning',
             'message': '未检测到试块委托单附件',
-            'section': None,
+            'section': 'import',
             'field': None,
-            'suggestion': '建议导入试块检测委托单或见证取样记录'
+            'suggestion': '建议导入试块检测委托单或见证取样记录，点击跳转至资料导入',
+            'jump_target': 'import',
+            'missing_category': 'delegation'
+        })
+    
+    has_draft = any(a.get('category') == 'draft' for a in attachments)
+    if not has_draft and len(image_attachments) < 3:
+        issues.append({
+            'level': 'info',
+            'message': '建议导入现场草稿记录',
+            'section': 'import',
+            'field': None,
+            'suggestion': '建议导入手写旁站记录或现场草稿照片',
+            'jump_target': 'import',
+            'missing_category': 'draft'
         })
 
     required_fields = [

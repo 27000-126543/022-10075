@@ -95,6 +95,7 @@ class IssueListItem(QWidget):
 
 class ExportWindow(QWidget):
     jump_to_edit = Signal(int, str)
+    jump_to_import = Signal(int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -348,7 +349,24 @@ class ExportWindow(QWidget):
         """)
         export_pdf_btn.clicked.connect(self.export_pdf)
 
-        batch_export_btn = QPushButton("📦 批量导出选中")
+        archive_btn = QPushButton("🗂️ 一键生成归档包")
+        archive_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0ea5e9;
+                color: white;
+                padding: 10px 22px;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0284c7;
+            }
+        """)
+        archive_btn.clicked.connect(self.export_current_archive)
+
+        batch_export_btn = QPushButton("📦 批量导出归档包")
         batch_export_btn.setStyleSheet("""
             QPushButton {
                 background-color: #8b5cf6;
@@ -363,11 +381,12 @@ class ExportWindow(QWidget):
                 background-color: #7c3aed;
             }
         """)
-        batch_export_btn.clicked.connect(self.batch_export)
+        batch_export_btn.clicked.connect(self.batch_export_archives)
 
         btn_layout.addStretch()
         btn_layout.addWidget(preview_pdf_btn)
         btn_layout.addWidget(export_pdf_btn)
+        btn_layout.addWidget(archive_btn)
         btn_layout.addWidget(batch_export_btn)
         export_layout.addLayout(btn_layout)
 
@@ -568,14 +587,18 @@ class ExportWindow(QWidget):
 
     def on_fix_requested(self, issue_data):
         section = issue_data.get('section')
-        if not section:
-            QMessageBox.information(self, "提示", "此问题无法自动跳转，请在『资料导入』或『日志编排』窗口手动处理。")
-            return
+        jump_target = issue_data.get('jump_target', 'edit')
+        missing_category = issue_data.get('missing_category', '')
 
         if not self.current_record_id:
             return
-
-        self.jump_to_edit.emit(self.current_record_id, section)
+        
+        if jump_target == 'import':
+            self.jump_to_import.emit(self.current_record_id, missing_category)
+        elif section:
+            self.jump_to_edit.emit(self.current_record_id, section)
+        else:
+            QMessageBox.information(self, "提示", "此问题无法自动跳转，请手动处理。")
 
     def get_record_full_data(self, record_id):
         record = db_manager.get_pouring_record_by_id(record_id)
@@ -665,6 +688,8 @@ class ExportWindow(QWidget):
             progress.setValue(30)
 
             export_utils.generate_pdf(record, attachments, sign_records, file_path)
+            
+            db_manager.update_record_exported(self.current_record_id)
 
             progress.setValue(100)
 
@@ -675,7 +700,131 @@ class ExportWindow(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"导出PDF时出错：{str(e)}")
 
-    def batch_export(self):
+    def _generate_archive_for_record(self, record_id, output_dir, projects_list):
+        import shutil as _shutil
+
+        record, attachments, sign_records = self.get_record_full_data(record_id)
+        if not record:
+            return False, "找不到记录"
+
+        buildings = db_manager.get_buildings_by_project(record['project_id'])
+        project_name = next((p['name'] for p in projects_list if p['id'] == record['project_id']), '')
+        building_name = next((b['name'] for b in buildings if b['id'] == record['building_id']), '')
+
+        def sanitize(text):
+            return "".join(c for c in text if c.isalnum() or c in (' ', '-', '_', '号', '楼', '层')).strip() or '未命名'
+
+        folder_name = f"旁站归档_{sanitize(project_name)}_{sanitize(building_name)}_{record['pouring_date']}_{sanitize(record['component_location'])}"
+        record_folder = os.path.join(output_dir, folder_name)
+        os.makedirs(record_folder, exist_ok=True)
+
+        pdf_filename = export_utils.generate_filename(record, projects_list, buildings)
+        pdf_path = os.path.join(record_folder, pdf_filename)
+        record['project_name'] = project_name
+        record['building_name'] = building_name
+        export_utils.generate_pdf(record, attachments, sign_records, pdf_path)
+
+        if attachments:
+            original_folder = os.path.join(record_folder, "原始附件")
+            os.makedirs(original_folder, exist_ok=True)
+
+            category_folders = {
+                'photo': '01_现场照片',
+                'ticket': '02_罐车小票',
+                'delegation': '03_试块委托单',
+                'draft': '04_现场草稿',
+                'document': '05_其他文档',
+                'other': '06_其他文件'
+            }
+
+            for att in attachments:
+                cat = att.get('category', 'other')
+                cat_folder = category_folders.get(cat, '06_其他文件')
+                target_dir = os.path.join(original_folder, cat_folder)
+                os.makedirs(target_dir, exist_ok=True)
+
+                src = att.get('file_path', '')
+                if src and os.path.exists(src):
+                    dest = os.path.join(target_dir, att.get('file_name', ''))
+                    counter = 1
+                    while os.path.exists(dest):
+                        name, ext = os.path.splitext(att.get('file_name', ''))
+                        dest = os.path.join(target_dir, f"{name}_{counter}{ext}")
+                        counter += 1
+                    try:
+                        _shutil.copy2(src, dest)
+                    except:
+                        pass
+
+        manifest_path = os.path.join(record_folder, "归档清单.txt")
+        with open(manifest_path, 'w', encoding='utf-8') as mf:
+            mf.write("=" * 60 + "\n")
+            mf.write("  混凝土浇筑旁站归档清单\n")
+            mf.write("=" * 60 + "\n\n")
+            mf.write(f"项目名称: {project_name}\n")
+            mf.write(f"楼栋号: {building_name}\n")
+            mf.write(f"浇筑日期: {record['pouring_date']}\n")
+            mf.write(f"构件部位: {record['component_location']}\n")
+            mf.write(f"施工单位: {record.get('construction_unit', '')}\n")
+            mf.write(f"强度等级: {record.get('strength_grade', '')}\n")
+            mf.write(f"浇筑方量: {record.get('concrete_volume', 0)} m³\n\n")
+
+            cat_labels = {'photo': '现场照片', 'ticket': '罐车小票', 'delegation': '试块委托单',
+                          'draft': '现场草稿', 'document': '其他文档', 'other': '其他文件'}
+            cat_counts = {}
+            for a in attachments:
+                c = a.get('category', 'other')
+                cat_counts[c] = cat_counts.get(c, 0) + 1
+
+            mf.write("附件统计:\n")
+            for cat, label in cat_labels.items():
+                mf.write(f"  {label}: {cat_counts.get(cat, 0)} 个\n")
+            mf.write(f"  合计: {len(attachments)} 个\n\n")
+
+            mf.write(f"施工签字: {'✅' + record.get('constructor_signature', '') if record.get('constructor_signature') else '❌ 未签字'}\n")
+            mf.write(f"监理签字: {'✅' + record.get('supervisor_signature', '') if record.get('supervisor_signature') else '❌ 未签字'}\n\n")
+            mf.write(f"归档生成时间: {db_manager.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+        db_manager.update_record_exported(record_id)
+        return True, record_folder
+
+    def export_current_archive(self):
+        if not self.current_record_id:
+            QMessageBox.warning(self, "提示", "请先选择一条浇筑记录")
+            return
+
+        dir_path = QFileDialog.getExistingDirectory(
+            self,
+            "选择归档包输出目录",
+            os.path.join(os.path.expanduser("~"), "Documents")
+        )
+        if not dir_path:
+            return
+
+        try:
+            progress = QProgressDialog("正在生成归档包...", "取消", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+
+            progress.setValue(20)
+            projects = db_manager.get_all_projects()
+            progress.setValue(40)
+
+            success, result_path = self._generate_archive_for_record(self.current_record_id, dir_path, projects)
+            progress.setValue(100)
+
+            if success:
+                QMessageBox.information(self, "成功",
+                    f"归档包已生成！\n\n位置: {result_path}\n\n包含内容:\n  • 旁站记录 PDF\n  • 按分类整理的原始附件文件夹\n  • 归档清单.txt")
+            else:
+                QMessageBox.warning(self, "错误", f"生成失败: {result_path}")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "错误", f"生成归档包时出错：{str(e)}")
+
+    def batch_export_archives(self):
         selected_records = []
 
         root = self.record_tree.invisibleRootItem()
@@ -692,12 +841,12 @@ class ExportWindow(QWidget):
                             selected_records.append(record_id)
 
         if not selected_records:
-            QMessageBox.warning(self, "提示", "请先勾选要导出的记录")
+            QMessageBox.warning(self, "提示", "请先勾选要导出的记录（左侧树中的复选框）")
             return
 
         dir_path = QFileDialog.getExistingDirectory(
             self,
-            "选择批量导出目录",
+            "选择批量归档输出目录",
             os.path.join(os.path.expanduser("~"), "Documents")
         )
 
@@ -706,8 +855,9 @@ class ExportWindow(QWidget):
 
         success_count = 0
         fail_count = 0
+        errors = []
 
-        progress = QProgressDialog("正在批量导出...", "取消", 0, len(selected_records), self)
+        progress = QProgressDialog("正在批量生成归档包...", "取消", 0, len(selected_records), self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
 
@@ -718,31 +868,30 @@ class ExportWindow(QWidget):
                 break
 
             progress.setValue(idx)
-            progress.setLabelText(f"正在导出第 {idx + 1}/{len(selected_records)} 个记录...")
-
-            record, attachments, sign_records = self.get_record_full_data(record_id)
-            if not record:
-                fail_count += 1
-                continue
-
-            buildings = db_manager.get_buildings_by_project(record['project_id'])
-            default_name = export_utils.generate_filename(record, projects, buildings)
-            file_path = os.path.join(dir_path, default_name)
+            progress.setLabelText(f"正在处理第 {idx + 1}/{len(selected_records)} 个记录...")
 
             try:
-                export_utils.generate_pdf(record, attachments, sign_records, file_path)
-                success_count += 1
+                success, msg = self._generate_archive_for_record(record_id, dir_path, projects)
+                if success:
+                    success_count += 1
+                else:
+                    fail_count += 1
+                    errors.append(f"记录ID {record_id}: {msg}")
             except Exception as e:
                 fail_count += 1
-                print(f"导出失败: {str(e)}")
+                errors.append(f"记录ID {record_id}: {str(e)}")
+                import traceback
+                traceback.print_exc()
 
         progress.setValue(len(selected_records))
 
-        QMessageBox.information(
-            self,
-            "批量导出完成",
-            f"成功导出: {success_count} 个\n失败: {fail_count} 个\n\n输出目录: {dir_path}"
-        )
+        msg = f"批量归档完成！\n\n成功: {success_count} 个\n失败: {fail_count} 个\n\n输出目录: {dir_path}"
+        if errors:
+            msg += "\n\n错误详情:\n" + "\n".join(errors[:10])
+            if len(errors) > 10:
+                msg += f"\n...还有 {len(errors) - 10} 个错误"
+
+        QMessageBox.information(self, "批量归档结果", msg)
 
     def on_record_selected(self, record_id):
         if record_id:

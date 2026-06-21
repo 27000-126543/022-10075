@@ -53,12 +53,18 @@ def init_database():
         end_time TEXT,
         supervisor_signature TEXT,
         constructor_signature TEXT,
+        exported_at TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (project_id) REFERENCES projects (id),
         FOREIGN KEY (building_id) REFERENCES buildings (id)
     )
     ''')
+    
+    cursor.execute("PRAGMA table_info(pouring_records)")
+    record_columns = [col[1] for col in cursor.fetchall()]
+    if 'exported_at' not in record_columns:
+        cursor.execute("ALTER TABLE pouring_records ADD COLUMN exported_at TEXT")
     
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS attachments (
@@ -377,6 +383,65 @@ def get_sign_records_by_record(record_id):
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM sign_records WHERE record_id = ? ORDER BY created_at", (record_id,))
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def update_record_exported(record_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("UPDATE pouring_records SET exported_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (now, record_id))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_record_stats(record_id=None, project_id=None, building_id=None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        query = """
+            SELECT 
+                pr.id,
+                pr.project_id,
+                pr.building_id,
+                pr.pouring_date,
+                pr.component_location,
+                pr.construction_unit,
+                pr.strength_grade,
+                pr.concrete_volume,
+                pr.supervisor_signature,
+                pr.constructor_signature,
+                pr.exported_at,
+                SUM(CASE WHEN a.category = 'photo' THEN 1 ELSE 0 END) as photo_count,
+                SUM(CASE WHEN a.category = 'ticket' THEN 1 ELSE 0 END) as ticket_count,
+                SUM(CASE WHEN a.category = 'delegation' THEN 1 ELSE 0 END) as delegation_count,
+                SUM(CASE WHEN a.category = 'draft' THEN 1 ELSE 0 END) as draft_count,
+                SUM(CASE WHEN a.category = 'document' THEN 1 ELSE 0 END) as document_count,
+                SUM(CASE WHEN a.category = 'other' THEN 1 ELSE 0 END) as other_count,
+                COUNT(a.id) as total_attachments
+            FROM pouring_records pr
+            LEFT JOIN attachments a ON pr.id = a.record_id
+            WHERE 1=1
+        """
+        params = []
+        
+        if record_id:
+            query += " AND pr.id = ?"
+            params.append(record_id)
+        if project_id:
+            query += " AND pr.project_id = ?"
+            params.append(project_id)
+        if building_id:
+            query += " AND pr.building_id = ?"
+            params.append(building_id)
+        
+        query += " GROUP BY pr.id ORDER BY pr.pouring_date DESC, pr.id DESC"
+        cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()

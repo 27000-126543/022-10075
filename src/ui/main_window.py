@@ -8,6 +8,7 @@ from PySide6.QtGui import QFont, QIcon, QAction
 from src.ui.import_window import ImportWindow
 from src.ui.edit_window import EditWindow
 from src.ui.export_window import ExportWindow
+from src.ui.ledger_window import LedgerWindow
 
 
 class MainWindow(QMainWindow):
@@ -41,13 +42,18 @@ class MainWindow(QMainWindow):
         self.import_window = ImportWindow()
         self.edit_window = EditWindow()
         self.export_window = ExportWindow()
+        self.ledger_window = LedgerWindow()
         
         self.content_stack.addWidget(self.import_window)
         self.content_stack.addWidget(self.edit_window)
         self.content_stack.addWidget(self.export_window)
+        self.content_stack.addWidget(self.ledger_window)
         
         self.import_window.project_tree.itemClicked.connect(self.on_record_selected)
         self.export_window.jump_to_edit.connect(self.on_jump_to_edit)
+        self.export_window.jump_to_import.connect(self.on_jump_to_import)
+        self.ledger_window.jump_to_edit.connect(self.on_ledger_jump_edit)
+        self.ledger_window.jump_to_export.connect(self.on_ledger_jump_export)
         
         status_bar = QStatusBar()
         status_bar.showMessage("就绪 | 数据存储于: %USERPROFILE%/.concrete_log")
@@ -134,7 +140,8 @@ class MainWindow(QMainWindow):
         nav_items = [
             ("📥 资料导入", 0, "导入照片、小票、委托单等资料"),
             ("✏️ 日志编排", 1, "编辑旁站记录内容，分配照片"),
-            ("📄 打印导出", 2, "检查问题，导出PDF文件")
+            ("📄 打印导出", 2, "检查问题，导出PDF文件"),
+            ("📊 归档台账", 3, "查看记录完整度、批量归档")
         ]
         
         for idx, (text, page_index, tooltip) in enumerate(nav_items):
@@ -211,7 +218,8 @@ class MainWindow(QMainWindow):
         hints = [
             "选择项目和楼栋，拖拽文件到右侧区域进行导入",
             "从左侧拖拽照片到对应段落旁边，编辑记录内容",
-            "检查资料完整性问题，然后导出PDF文件"
+            "检查资料完整性问题，然后导出PDF文件",
+            "查看记录完整度，勾选后批量生成归档包"
         ]
         self.page_hint.setText(hints[page_index])
         
@@ -219,6 +227,8 @@ class MainWindow(QMainWindow):
             self.edit_window.on_record_selected(self.current_record_id)
         elif page_index == 2 and self.current_record_id:
             self.export_window.on_record_selected(self.current_record_id)
+        elif page_index == 3:
+            self.ledger_window.refresh()
         
         if page_index == 2:
             self.export_window.refresh()
@@ -246,6 +256,23 @@ class MainWindow(QMainWindow):
         
         if section_key:
             self.edit_window.focus_section(section_key)
+    
+    def on_jump_to_import(self, record_id, missing_category):
+        self.current_record_id = record_id
+        
+        self.switch_page(0, self.nav_buttons[0])
+        
+        self.import_window.focus_record(record_id, missing_category)
+    
+    def on_ledger_jump_edit(self, record_id):
+        self.current_record_id = record_id
+        self.switch_page(1, self.nav_buttons[1])
+        self.edit_window.on_record_selected(record_id)
+    
+    def on_ledger_jump_export(self, record_id):
+        self.current_record_id = record_id
+        self.switch_page(2, self.nav_buttons[2])
+        self.export_window.on_record_selected(record_id)
     
     def show_help(self):
         help_text = """

@@ -144,6 +144,45 @@ def test_export_utils(record_id):
     print(f"  使用字体: {font_name}")
 
 
+def test_new_features(record_id):
+    print("\n" + "=" * 50)
+    print("测试新增功能...")
+    print("=" * 50)
+    
+    print("\n✓ 记录统计查询测试...")
+    stats = db_manager.get_record_stats()
+    print(f"  总共获取 {len(stats)} 条记录统计")
+    if stats:
+        s = stats[0]
+        print(f"  样例数据: 记录ID={s.get('id')}, 照片数={s.get('photo_count')}, 小票数={s.get('ticket_count')}")
+        print(f"  委托单数={s.get('delegation_count')}, 草稿数={s.get('draft_count')}")
+    
+    print("\n✓ 导出状态更新测试...")
+    before = db_manager.get_pouring_record_by_id(record_id)
+    print(f"  更新前 exported_at: {before.get('exported_at')}")
+    db_manager.update_record_exported(record_id)
+    after = db_manager.get_pouring_record_by_id(record_id)
+    print(f"  更新后 exported_at: {after.get('exported_at')}")
+    assert after.get('exported_at') is not None, "导出时间更新失败"
+    print("  ✓ 导出状态更新成功")
+    
+    print("\n✓ 按过滤条件查询记录统计...")
+    project_records = db_manager.get_record_stats(project_id=before['project_id'])
+    print(f"  按项目ID查询: 获取 {len(project_records)} 条记录")
+    
+    print("\n✓ 问题检查(带跳转目标)...")
+    record = db_manager.get_pouring_record_by_id(record_id)
+    attachments = db_manager.get_attachments_by_record(record_id)
+    sign_records = db_manager.get_sign_records_by_record(record_id)
+    issues = export_utils.check_record_issues(record, attachments, sign_records)
+    import_issues = [i for i in issues if i.get('jump_target') == 'import']
+    edit_issues = [i for i in issues if i.get('jump_target') == 'edit' or not i.get('jump_target')]
+    print(f"  跳转到导入窗口的问题: {len(import_issues)} 个")
+    print(f"  跳转到编辑窗口的问题: {len(edit_issues)} 个")
+    for iss in import_issues:
+        print(f"    - {iss.get('message')} (缺失分类: {iss.get('missing_category')})")
+
+
 def test_cleanup(record_id):
     print("\n" + "=" * 50)
     print("清理测试数据...")
@@ -160,6 +199,7 @@ def main():
         project_id, building_id, record_id = test_database()
         test_file_utils()
         test_export_utils(record_id)
+        test_new_features(record_id)
         test_cleanup(record_id)
         
         print("\n" + "=" * 50)
