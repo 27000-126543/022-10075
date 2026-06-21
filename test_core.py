@@ -105,16 +105,39 @@ def test_export_utils(record_id):
     
     if issues:
         print(f"✓ 检测到 {len(issues)} 个问题:")
-        for issue_type, issue_text in issues:
-            icon = {'error': '❌', 'warning': '⚠️', 'info': 'ℹ️'}.get(issue_type, '•')
-            print(f"  {icon} {issue_text}")
+        for issue in issues:
+            level = issue.get('level', 'info')
+            message = issue.get('message', '')
+            section = issue.get('section', '')
+            icon = {'error': '❌', 'warning': '⚠️', 'info': 'ℹ️'}.get(level, '•')
+            section_text = f" [{section}]" if section else ""
+            print(f"  {icon} {message}{section_text}")
     else:
         print("✓ 未检测到问题")
     
-    error_count = sum(1 for i in issues if i[0] == 'error')
-    warning_count = sum(1 for i in issues if i[0] == 'warning')
-    info_count = sum(1 for i in issues if i[0] == 'info')
+    error_count = sum(1 for i in issues if i.get('level') == 'error')
+    warning_count = sum(1 for i in issues if i.get('level') == 'warning')
+    info_count = sum(1 for i in issues if i.get('level') == 'info')
     print(f"✓ 问题统计: {error_count}个错误, {warning_count}个警告, {info_count}个提示")
+    
+    print("\n✓ 附件分类功能测试...")
+    test_files = [
+        '现场照片_浇筑.jpg',
+        '罐车小票_20240115.pdf',
+        '试块委托单.xlsx',
+        '旁站记录草稿.txt',
+        '普通文档.docx'
+    ]
+    for f in test_files:
+        cat = file_utils.classify_attachment(f)
+        cat_info = file_utils.get_category_info(cat)
+        print(f"  {cat_info['icon']} {f} -> {cat_info['name']}")
+    
+    print("\n✓ 文件名生成测试...")
+    projects = db_manager.get_all_projects()
+    buildings = db_manager.get_buildings_by_project(record['project_id'])
+    filename = export_utils.generate_filename(record, projects, buildings)
+    print(f"  生成文件名: {filename}")
     
     print("\n✓ 中文字体注册测试...")
     font_name = export_utils.register_fonts()

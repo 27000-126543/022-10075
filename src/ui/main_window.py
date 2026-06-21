@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(self.export_window)
         
         self.import_window.project_tree.itemClicked.connect(self.on_record_selected)
+        self.export_window.jump_to_edit.connect(self.on_jump_to_edit)
         
         status_bar = QStatusBar()
         status_bar.showMessage("就绪 | 数据存储于: %USERPROFILE%/.concrete_log")
@@ -235,6 +236,16 @@ class MainWindow(QMainWindow):
                 self.edit_window.on_record_selected(item_id)
             elif self.content_stack.currentIndex() == 2:
                 self.export_window.on_record_selected(item_id)
+    
+    def on_jump_to_edit(self, record_id, section_key):
+        self.current_record_id = record_id
+        
+        self.switch_page(1, self.nav_buttons[1])
+        
+        self.edit_window.on_record_selected(record_id)
+        
+        if section_key:
+            self.edit_window.focus_section(section_key)
     
     def show_help(self):
         help_text = """

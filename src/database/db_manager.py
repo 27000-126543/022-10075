@@ -70,10 +70,16 @@ def init_database():
         file_size INTEGER,
         description TEXT,
         section_ref TEXT,
+        category TEXT DEFAULT 'other',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (record_id) REFERENCES pouring_records (id)
     )
     ''')
+    
+    cursor.execute("PRAGMA table_info(attachments)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'category' not in columns:
+        cursor.execute("ALTER TABLE attachments ADD COLUMN category TEXT DEFAULT 'other'")
     
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS sign_records (
@@ -274,8 +280,8 @@ def add_attachment(attachment_data):
     cursor = conn.cursor()
     try:
         cursor.execute('''
-        INSERT INTO attachments (record_id, file_name, file_path, file_type, file_size, description, section_ref)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO attachments (record_id, file_name, file_path, file_type, file_size, description, section_ref, category)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             attachment_data.get('record_id'),
             attachment_data.get('file_name'),
@@ -283,7 +289,8 @@ def add_attachment(attachment_data):
             attachment_data.get('file_type'),
             attachment_data.get('file_size', 0),
             attachment_data.get('description', ''),
-            attachment_data.get('section_ref', '')
+            attachment_data.get('section_ref', ''),
+            attachment_data.get('category', 'other')
         ))
         conn.commit()
         return cursor.lastrowid
@@ -306,6 +313,28 @@ def update_attachment_section(attachment_id, section_ref):
     cursor = conn.cursor()
     try:
         cursor.execute("UPDATE attachments SET section_ref = ? WHERE id = ?", (section_ref, attachment_id))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def update_attachment_category(attachment_id, category):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE attachments SET category = ? WHERE id = ?", (category, attachment_id))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def update_attachment_description(attachment_id, description):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE attachments SET description = ? WHERE id = ?", (description, attachment_id))
         conn.commit()
         return True
     finally:

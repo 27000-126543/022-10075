@@ -7,6 +7,39 @@ import hashlib
 
 STORAGE_DIR = os.path.join(str(Path.home()), ".concrete_log", "attachments")
 
+ATTACHMENT_CATEGORIES = {
+    'photo': {
+        'name': '现场照片',
+        'icon': '📷',
+        'keywords': ['照片', 'photo', 'image', 'img', '现场', '浇筑', '振捣', '模板', '钢筋', '试块', '验收']
+    },
+    'ticket': {
+        'name': '罐车小票',
+        'icon': '🧾',
+        'keywords': ['小票', 'ticket', '送货', '发货', '罐车', '商混', '混凝土小票', '配合比单']
+    },
+    'delegation': {
+        'name': '试块委托单',
+        'icon': '📋',
+        'keywords': ['委托', '试验', '检测', '送检', '试块', '报告', '见证取样']
+    },
+    'draft': {
+        'name': '现场草稿',
+        'icon': '📝',
+        'keywords': ['草稿', '记录', '笔记', '手写', 'note', 'draft', '原始', '旁站记录']
+    },
+    'document': {
+        'name': '其他文档',
+        'icon': '📄',
+        'keywords': []
+    },
+    'other': {
+        'name': '其他文件',
+        'icon': '📦',
+        'keywords': []
+    }
+}
+
 
 def ensure_storage_dir():
     os.makedirs(STORAGE_DIR, exist_ok=True)
@@ -24,6 +57,33 @@ def get_file_type(file_path):
         return 'document'
     else:
         return 'other'
+
+
+def classify_attachment(file_path):
+    file_name = os.path.basename(file_path).lower()
+    file_type = get_file_type(file_path)
+    
+    if file_type == 'image':
+        for cat_key in ['photo', 'ticket', 'delegation', 'draft']:
+            cat = ATTACHMENT_CATEGORIES[cat_key]
+            for keyword in cat['keywords']:
+                if keyword.lower() in file_name:
+                    return cat_key
+        return 'photo'
+    
+    if file_type == 'document':
+        for cat_key in ['ticket', 'delegation', 'draft']:
+            cat = ATTACHMENT_CATEGORIES[cat_key]
+            for keyword in cat['keywords']:
+                if keyword.lower() in file_name:
+                    return cat_key
+        return 'document'
+    
+    return 'other'
+
+
+def get_category_info(category_key):
+    return ATTACHMENT_CATEGORIES.get(category_key, ATTACHMENT_CATEGORIES['other'])
 
 
 def copy_to_storage(source_path, record_id, file_type=''):
